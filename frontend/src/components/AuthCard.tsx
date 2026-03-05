@@ -1,4 +1,12 @@
-export default function AuthCard({ title, subtitle, children }) {
+import type { ReactNode } from 'react'
+
+interface AuthCardProps {
+  title: string
+  subtitle: string
+  children: ReactNode
+}
+
+export default function AuthCard({ title, subtitle, children }: AuthCardProps) {
   return (
     <div style={{
       minHeight: '100vh',

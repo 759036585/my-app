@@ -10,7 +10,7 @@ export default function DashboardPage() {
     navigate('/login')
   }
 
-  const formatDate = (dateStr) => {
+  const formatDate = (dateStr: string | undefined) => {
     if (!dateStr) return '—'
     return new Date(dateStr).toLocaleString('zh-CN')
   }
@@ -125,9 +125,9 @@ export default function DashboardPage() {
         }}>
           {[
             { label: '用户 ID', value: `#${user?.id}`, icon: '🔑', mono: true },
-            { label: '用户名', value: user?.username, icon: '👤' },
-            { label: '邮箱地址', value: user?.email, icon: '📧' },
-            { label: '注册时间', value: formatDate(user?.created_at), icon: '📅' },
+            { label: '用户名', value: user?.username, icon: '👤', mono: false },
+            { label: '邮箱地址', value: user?.email, icon: '📧', mono: false },
+            { label: '注册时间', value: formatDate(user?.created_at), icon: '📅', mono: false },
           ].map(item => (
             <div key={item.label} style={{
               padding: '20px 24px',

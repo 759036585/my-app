@@ -1,10 +1,18 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import { authAPI } from '../utils/api'
+import type { User } from '../types'
 
-const AuthContext = createContext(null)
+interface AuthContextType {
+  user: User | null
+  loading: boolean
+  login: (token: string, userData: User) => void
+  logout: () => void
+}
 
-export function AuthProvider({ children }) {
-  const [user, setUser]       = useState(null)
+const AuthContext = createContext<AuthContextType | null>(null)
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser]       = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
   // 初始化：检查本地 Token
@@ -23,7 +31,7 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  const login = (token, userData) => {
+  const login = (token: string, userData: User) => {
     localStorage.setItem('token', token)
     localStorage.setItem('user', JSON.stringify(userData))
     setUser(userData)
@@ -42,7 +50,7 @@ export function AuthProvider({ children }) {
   )
 }
 
-export const useAuth = () => {
+export const useAuth = (): AuthContextType => {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used within AuthProvider')
   return ctx

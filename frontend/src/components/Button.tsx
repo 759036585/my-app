@@ -1,4 +1,12 @@
-export default function Button({ children, loading, variant = 'primary', ...props }) {
+import type { ButtonHTMLAttributes, ReactNode } from 'react'
+
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  children: ReactNode
+  loading?: boolean
+  variant?: 'primary' | 'ghost'
+}
+
+export default function Button({ children, loading, variant = 'primary', ...props }: ButtonProps) {
   const styles = {
     primary: {
       background: 'var(--accent)',
@@ -26,8 +34,8 @@ export default function Button({ children, loading, variant = 'primary', ...prop
         letterSpacing: '0.02em',
         background: styles.background,
         color: styles.color,
-        border: styles.border || 'none',
-        boxShadow: styles.boxShadow,
+        border: 'border' in styles ? styles.border : 'none',
+        boxShadow: 'boxShadow' in styles ? styles.boxShadow : undefined,
         opacity: (loading || props.disabled) ? 0.6 : 1,
         cursor: (loading || props.disabled) ? 'not-allowed' : 'pointer',
         transition: 'all 0.2s',

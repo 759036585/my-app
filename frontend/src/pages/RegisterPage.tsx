@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import AuthCard from '../components/AuthCard'
 import Input    from '../components/Input'
 import Button   from '../components/Button'
 import { authAPI } from '../utils/api'
 import { useAuth } from '../hooks/useAuth'
+import type { AxiosError } from 'axios'
 
 const UserIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -26,7 +27,7 @@ const LockIcon = () => (
 )
 
 // 密码强度指示器
-function PasswordStrength({ password }) {
+function PasswordStrength({ password }: { password: string }) {
   if (!password) return null
   const checks = [
     password.length >= 6,
@@ -66,12 +67,12 @@ export default function RegisterPage() {
   const { login } = useAuth()
 
   const [form, setForm]       = useState({ username: '', email: '', password: '', confirm: '' })
-  const [errors, setErrors]   = useState({})
+  const [errors, setErrors]   = useState<Record<string, string>>({})
   const [apiError, setApiError] = useState('')
   const [loading, setLoading] = useState(false)
 
   const validate = () => {
-    const e = {}
+    const e: Record<string, string> = {}
     if (!form.username) e.username = '请输入用户名'
     else if (form.username.length < 3) e.username = '用户名至少 3 位'
     if (!form.email) e.email = '请输入邮箱'
@@ -85,7 +86,7 @@ export default function RegisterPage() {
     return e
   }
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setApiError('')
     const errs = validate()
@@ -101,13 +102,14 @@ export default function RegisterPage() {
       login(res.data.token, res.data.user)
       navigate('/dashboard')
     } catch (err) {
-      setApiError(err.response?.data?.message || '注册失败，请重试')
+      const axiosErr = err as AxiosError<{ message?: string }>
+      setApiError(axiosErr.response?.data?.message || '注册失败，请重试')
     } finally {
       setLoading(false)
     }
   }
 
-  const set = (key) => (e) => {
+  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm(f => ({ ...f, [key]: e.target.value }))
     if (errors[key]) setErrors(prev => ({ ...prev, [key]: '' }))
   }

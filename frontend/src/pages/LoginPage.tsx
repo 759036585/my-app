@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import AuthCard from '../components/AuthCard'
 import Input    from '../components/Input'
 import Button   from '../components/Button'
 import { authAPI } from '../utils/api'
 import { useAuth } from '../hooks/useAuth'
+import type { AxiosError } from 'axios'
 
 const MailIcon = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -24,19 +25,19 @@ export default function LoginPage() {
   const { login } = useAuth()
 
   const [form, setForm]       = useState({ email: '', password: '' })
-  const [errors, setErrors]   = useState({})
+  const [errors, setErrors]   = useState<Record<string, string>>({})
   const [apiError, setApiError] = useState('')
   const [loading, setLoading] = useState(false)
 
   const validate = () => {
-    const e = {}
+    const e: Record<string, string> = {}
     if (!form.email) e.email = '请输入邮箱'
     else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = '邮箱格式不正确'
     if (!form.password) e.password = '请输入密码'
     return e
   }
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setApiError('')
     const errs = validate()
@@ -48,13 +49,15 @@ export default function LoginPage() {
       login(res.data.token, res.data.user)
       navigate('/dashboard')
     } catch (err) {
-      setApiError(err.response?.data?.message || '登录失败，请重试')
+      const axiosErr = err as AxiosError<{ message?: string }>
+      setApiError(axiosErr.response?.data?.message || '登录失败，请重试')
     } finally {
       setLoading(false)
     }
   }
 
-  const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }))
+  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(f => ({ ...f, [key]: e.target.value }))
 
   return (
     <AuthCard
@@ -118,8 +121,8 @@ export default function LoginPage() {
               fontWeight: 600,
               transition: 'opacity 0.2s',
             }}
-            onMouseEnter={e => e.target.style.opacity = 0.8}
-            onMouseLeave={e => e.target.style.opacity = 1}
+            onMouseEnter={e => (e.target as HTMLElement).style.opacity = '0.8'}
+            onMouseLeave={e => (e.target as HTMLElement).style.opacity = '1'}
           >
             立即注册
           </Link>

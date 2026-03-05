@@ -3,14 +3,15 @@ import { AuthProvider, useAuth } from './hooks/useAuth'
 import LoginPage    from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
 import DashboardPage from './pages/DashboardPage'
+import type { ReactNode } from 'react'
 
-function PrivateRoute({ children }) {
+function PrivateRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
   if (loading) return <PageLoader />
   return user ? children : <Navigate to="/login" replace />
 }
 
-function PublicRoute({ children }) {
+function PublicRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
   if (loading) return <PageLoader />
   return user ? <Navigate to="/dashboard" replace /> : children
