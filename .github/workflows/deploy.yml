@@ -2,9 +2,9 @@ name: 🚀 CI/CD — React + Node.js
 
 on:
   push:
-    branches: [main, master]
+    branches: [master, test]
   pull_request:
-    branches: [main, master]
+    branches: [master, test]
 
 env:
   NODE_VERSION: '18'
