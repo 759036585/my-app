@@ -128,6 +128,8 @@ jobs:
             MONGODB_URI=${{ secrets.MONGODB_URI }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
             FRONTEND_URL=${{ secrets.FRONTEND_URL }}
+            QIANFAN_BASE_URL=${{ secrets.QIANFAN_BASE_URL }}
+            QIANFAN_API_KEY=${{ secrets.QIANFAN_API_KEY }}
             ENVEOF
 
             echo "🔄 重启 PM2 服务..."
