@@ -46,7 +46,7 @@ export default function AuthCard({ title, subtitle, children }: AuthCardProps) {
             fontSize: 16,
             boxShadow: '0 0 20px var(--accent-glow)',
           }}>⚡</div>
-          <span style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em' }}>MyApp</span>
+<span style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-0.02em' }}>小李助手</span>
         </div>
 
         {/* 标题 */}

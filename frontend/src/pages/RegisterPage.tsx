@@ -117,7 +117,7 @@ export default function RegisterPage() {
   return (
     <AuthCard
       title="创建账户"
-      subtitle="只需几步，开始使用 MyApp"
+subtitle="只需几步，开始使用 小李助手"
     >
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Input
