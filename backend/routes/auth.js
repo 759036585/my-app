@@ -6,13 +6,16 @@ const User = require('../models/User');
 const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-key';
 const JWT_EXPIRES_IN = '7d';
+
+function getJwtSecret() {
+  return process.env.JWT_SECRET || 'dev-secret-key';
+}
 
 function generateToken(user) {
   return jwt.sign(
     { id: user._id, username: user.username, email: user.email },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: JWT_EXPIRES_IN }
   );
 }

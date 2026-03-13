@@ -1,11 +1,12 @@
+const dotenv = require('dotenv');
+dotenv.config();
+
 const express = require('express');
 const cors = require('cors');
-const dotenv = require('dotenv');
 const rateLimit = require('express-rate-limit');
 const authRoutes = require('./routes/auth');
+const chatRoutes = require('./routes/chat');
 const { initDB } = require('./config/database');
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -26,8 +27,16 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
+// 聊天接口限流：更宽松（每个 IP 每 15 分钟最多 300 次）
+const chatLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  message: { message: '请求过于频繁，请稍后再试' },
+});
+
 // ── 路由 ──────────────────────────────────
 app.use('/api/auth', authRoutes);
+app.use('/api/chat', chatLimiter, chatRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

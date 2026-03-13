@@ -1,6 +1,7 @@
 import { useAuth } from '../hooks/useAuth'
 import { useNavigate } from 'react-router-dom'
 import { useState, useRef, useEffect } from 'react'
+import { chatAPI } from '../utils/api'
 
 interface Message {
   id: string
@@ -20,14 +21,6 @@ const SUGGESTIONS = [
   { icon: '📊', title: '数据分析', desc: '解读销售数据趋势' },
   { icon: '🧑‍💻', title: '代码助手', desc: '帮我调试一段代码' },
   { icon: '📝', title: '文档润色', desc: '优化邮件的措辞表达' },
-]
-
-// 模拟AI回复
-const AI_REPLIES = [
-  '你好！我是小李助手，很高兴为你服务。有什么我可以帮助你的吗？ 😊',
-  '这是一个很好的问题！让我来为你详细解答...\n\n首先，我们需要理解问题的核心。根据我的分析，这里有几个关键点需要注意：\n\n1. **理解上下文** - 确保我们对问题有全面的认识\n2. **分步骤解决** - 将复杂问题拆分为可管理的小任务\n3. **验证结果** - 检查我们的解决方案是否正确\n\n希望这些信息对你有帮助！如果你还有其他问题，请随时提问。',
-  '好的，让我来帮你处理这个任务。以下是我的建议方案：\n\n**方案一：** 直接优化现有流程，预计可以提升 30% 的效率。\n\n**方案二：** 重新设计架构，虽然前期投入较大，但长期来看收益更高。\n\n你更倾向于哪个方案？我可以进一步展开讨论。',
-  '收到！我已经理解了你的需求。让我花几秒钟来思考最优解...\n\n✅ 分析完成！这里是我的回答：\n\n简单来说，你只需要按照以下步骤操作即可完成：\n\n```\n步骤 1: 准备环境\n步骤 2: 执行核心操作\n步骤 3: 验证结果\n```\n\n如果过程中遇到任何问题，随时告诉我！',
 ]
 
 export default function DashboardPage() {
@@ -56,7 +49,7 @@ export default function DashboardPage() {
     navigate('/login')
   }
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const text = inputValue.trim()
     if (!text || isTyping) return
 
@@ -76,17 +69,86 @@ export default function DashboardPage() {
       inputRef.current.style.height = 'auto'
     }
 
-    // 模拟AI回复
-    setTimeout(() => {
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: AI_REPLIES[Math.floor(Math.random() * AI_REPLIES.length)],
-        timestamp: new Date(),
+    // 调用百度千帆AI API（流式输出）
+    const chatHistory = [...messages, userMsg].map(m => ({
+      role: m.role,
+      content: m.content,
+    }))
+
+    // 预先创建AI消息占位
+    const aiMsgId = (Date.now() + 1).toString()
+    const aiMsg: Message = {
+      id: aiMsgId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+    }
+    setMessages(prev => [...prev, aiMsg])
+
+    try {
+      const response = await chatAPI.sendMessageStream(chatHistory)
+
+      // 读取SSE流
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      if (!reader) throw new Error('无法读取响应流')
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() || ''
+
+        for (const part of parts) {
+          const trimmed = part.trim()
+          if (!trimmed) continue
+
+          for (const line of trimmed.split('\n')) {
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6).trim()
+              if (dataStr === '[DONE]') break
+
+              try {
+                const data = JSON.parse(dataStr)
+                if (data.error) {
+                  throw new Error(data.error)
+                }
+                if (data.content) {
+                  setMessages(prev =>
+                    prev.map(m =>
+                      m.id === aiMsgId
+                        ? { ...m, content: m.content + data.content }
+                        : m
+                    )
+                  )
+                }
+              } catch (parseErr) {
+                // 忽略解析错误，继续处理
+                if (parseErr instanceof Error && parseErr.message !== 'Unexpected end of JSON input') {
+                  console.warn('SSE解析警告:', parseErr)
+                }
+              }
+            }
+          }
+        }
       }
-      setMessages(prev => [...prev, aiMsg])
+    } catch (err) {
+      console.error('AI请求失败:', err)
+      // 如果AI消息还是空的，显示错误信息
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === aiMsgId && !m.content
+            ? { ...m, content: `⚠️ 抱歉，请求出错了：${err instanceof Error ? err.message : '未知错误'}。请稍后重试。` }
+            : m
+        )
+      )
+    } finally {
       setIsTyping(false)
-    }, 1000 + Math.random() * 2000)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

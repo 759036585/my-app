@@ -35,4 +35,46 @@ export const authAPI = {
   getMe: () => api.get<{ user: import('../types').User }>('/auth/me'),
 }
 
+/**
+ * 聊天API
+ * 流式请求使用封装的 fetch（浏览器 axios 不支持 ReadableStream）
+ * 统一走 localStorage token 管理，与 axios 拦截器逻辑一致
+ */
+export const chatAPI = {
+  /** 非流式对话（使用 axios） */
+  sendMessage: (messages: { role: string; content: string }[], options?: { model?: string; temperature?: number }) =>
+    api.post('/chat/completions', { messages, stream: false, ...options }),
+
+  /** 流式对话（使用 fetch + SSE，统一 token 管理） */
+  sendMessageStream: async (messages: { role: string; content: string }[], options?: { model?: string; temperature?: number }) => {
+    const token = localStorage.getItem('token')
+    console.log('[ChatAPI] token from localStorage:', token ? `${token.substring(0, 30)}...` : '空！')
+    const response = await fetch('/api/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ messages, stream: true, ...options }),
+    })
+
+    if (response.status === 401) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      window.location.href = '/login'
+      throw new Error('登录已过期，请重新登录')
+    }
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.message || `请求失败: ${response.status}`)
+    }
+
+    return response
+  },
+
+  /** 获取可用模型列表 */
+  getModels: () => api.get('/chat/models'),
+}
+
 export default api
