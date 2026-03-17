@@ -1,38 +1,11 @@
-import axios, { type InternalAxiosRequestConfig } from 'axios'
+import request from './request'
 import type { AuthResponse, LoginData, RegisterData } from '../types'
 
-const api = axios.create({
-  baseURL: '/api',
-  timeout: 10000,
-  headers: { 'Content-Type': 'application/json' },
-})
-
-// 请求拦截器：自动带上 Token
-api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-
-// 响应拦截器：统一处理 401
-api.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-      window.location.href = '/login'
-    }
-    return Promise.reject(err)
-  }
-)
-
+/** 认证API */
 export const authAPI = {
-  register: (data: RegisterData) => api.post<AuthResponse>('/auth/register', data),
-  login: (data: LoginData) => api.post<AuthResponse>('/auth/login', data),
-  getMe: () => api.get<{ user: import('../types').User }>('/auth/me'),
+  register: (data: RegisterData) => request.post<AuthResponse>('/auth/register', data),
+  login: (data: LoginData) => request.post<AuthResponse>('/auth/login', data),
+  getMe: () => request.get<{ user: import('../types').User }>('/auth/me'),
 }
 
 /**
@@ -43,7 +16,7 @@ export const authAPI = {
 export const chatAPI = {
   /** 非流式对话（使用 axios） */
   sendMessage: (messages: { role: string; content: string }[], options?: { model?: string; temperature?: number }) =>
-    api.post('/chat/completions', { messages, stream: false, ...options }),
+    request.post('/chat/completions', { messages, stream: false, ...options }),
 
   /** 流式对话（使用 fetch + SSE，统一 token 管理） */
   sendMessageStream: async (messages: { role: string; content: string }[], options?: { model?: string; temperature?: number }) => {
@@ -74,7 +47,25 @@ export const chatAPI = {
   },
 
   /** 获取可用模型列表 */
-  getModels: () => api.get('/chat/models'),
+  getModels: () => request.get('/chat/models'),
 }
 
-export default api
+/** 对话记录API */
+export const conversationAPI = {
+  /** 获取当前用户的对话列表 */
+  getList: () => request.get('/conversations'),
+
+  /** 获取指定对话的完整消息 */
+  getDetail: (id: string) => request.get(`/conversations/${id}`),
+
+  /** 创建新对话 */
+  create: (data: { title?: string; messages?: { role: string; content: string }[] }) =>
+    request.post('/conversations', data),
+
+  /** 更新对话（标题、消息等） */
+  update: (id: string, data: { title?: string; messages?: { role: string; content: string }[] }) =>
+    request.put(`/conversations/${id}`, data),
+
+  /** 删除对话 */
+  delete: (id: string) => request.delete(`/conversations/${id}`),
+}

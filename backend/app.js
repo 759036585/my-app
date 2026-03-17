@@ -6,6 +6,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const authRoutes = require('./routes/auth');
 const chatRoutes = require('./routes/chat');
+const conversationRoutes = require('./routes/conversation');
 const { initDB } = require('./config/database');
 
 const app = express();
@@ -38,6 +39,7 @@ const chatLimiter = rateLimit({
 // ── 路由 ──────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatLimiter, chatRoutes);
+app.use('/api/conversations', conversationRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

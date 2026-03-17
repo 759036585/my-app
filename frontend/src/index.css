@@ -695,6 +695,26 @@ a {
   flex-shrink: 0;
 }
 
+.conversation-delete-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+}
+.conversation-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
 /* 侧边栏底部用户信息 */
 .sidebar-footer {
   border-top: 1px solid var(--border);

@@ -1,7 +1,10 @@
 import { useAuth } from '../hooks/useAuth'
 import { useNavigate } from 'react-router-dom'
-import { useState, useRef, useEffect } from 'react'
-import { chatAPI } from '../utils/api'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { chatAPI, conversationAPI } from '../utils/api'
+import Sidebar from '../components/Sidebar'
+import ChatContent from '../components/ChatContent'
+import ChatInput from '../components/ChatInput'
 
 interface Message {
   id: string
@@ -10,10 +13,11 @@ interface Message {
   timestamp: Date
 }
 
-interface Conversation {
+export interface Conversation {
   id: string
   title: string
   lastTime: string
+  messages: Message[]
 }
 
 const SUGGESTIONS = [
@@ -23,18 +27,47 @@ const SUGGESTIONS = [
   { icon: '📝', title: '文档润色', desc: '优化邮件的措辞表达' },
 ]
 
+/** 生成对话标题：取用户第一条消息的前20个字符 */
+function generateTitle(content: string) {
+  const text = content.trim().replace(/\n/g, ' ')
+  return text.length > 20 ? text.slice(0, 20) + '...' : text
+}
+
+/** 格式化时间为简短文字 */
+function formatLastTime(date: Date | string) {
+  const target = typeof date === 'string' ? new Date(date) : date
+  const now = new Date()
+  const diff = now.getTime() - target.getTime()
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes}分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}小时前`
+  const days = Math.floor(hours / 24)
+  return `${days}天前`
+}
+
 export default function DashboardPage() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
-  const [messages, setMessages] = useState<Message[]>([])
+
+  // 多对话状态管理
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [activeConvId, setActiveConvId] = useState<string>('')
+  const [isLoading, setIsLoading] = useState(true) // 加载历史对话中
+
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const [conversations] = useState<Conversation[]>([
-    { id: '1', title: '新的对话', lastTime: '刚刚' },
-  ])
+
+  // 用于防抖保存的定时器
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 获取当前激活的对话
+  const activeConversation = conversations.find(c => c.id === activeConvId)
+  const messages = activeConversation?.messages || []
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -44,14 +77,196 @@ export default function DashboardPage() {
     scrollToBottom()
   }, [messages, isTyping])
 
+  // 切换对话后自动聚焦输入框
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [activeConvId])
+
+  // ===== 登录后从后端加载对话历史 =====
+  useEffect(() => {
+    async function loadConversations() {
+      try {
+        const res = await conversationAPI.getList()
+        const list = res.data.conversations || []
+
+        if (list.length === 0) {
+          // 没有历史对话，创建一个空对话（此时不保存到后端，等有消息再保存）
+          const newConv: Conversation = {
+            id: 'local_' + Date.now().toString(),
+            title: '新的对话',
+            lastTime: '刚刚',
+            messages: [],
+          }
+          setConversations([newConv])
+          setActiveConvId(newConv.id)
+        } else {
+          // 加载列表，不加载完整消息（延迟加载）
+          const convs: Conversation[] = list.map((item: any) => ({
+            id: item.id,
+            title: item.title,
+            lastTime: formatLastTime(item.updatedAt),
+            messages: [], // 消息延迟加载
+          }))
+          setConversations(convs)
+          setActiveConvId(convs[0].id)
+        }
+      } catch (err) {
+        console.error('加载对话历史失败:', err)
+        // 失败时也创建一个本地对话，不阻塞使用
+        const newConv: Conversation = {
+          id: 'local_' + Date.now().toString(),
+          title: '新的对话',
+          lastTime: '刚刚',
+          messages: [],
+        }
+        setConversations([newConv])
+        setActiveConvId(newConv.id)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadConversations()
+  }, [])
+
+  // ===== 切换对话时，延迟加载消息 =====
+  useEffect(() => {
+    if (!activeConvId || activeConvId.startsWith('local_')) return
+
+    const conv = conversations.find(c => c.id === activeConvId)
+    // 如果该对话消息为空且不是本地新对话，从后端加载
+    if (conv && conv.messages.length === 0) {
+      conversationAPI.getDetail(activeConvId).then(res => {
+        const data = res.data
+        const loadedMessages: Message[] = (data.messages || []).map((m: any, idx: number) => ({
+          id: `${activeConvId}_msg_${idx}`,
+          role: m.role,
+          content: m.content,
+          timestamp: m.createdAt ? new Date(m.createdAt) : new Date(),
+        }))
+        setConversations(prev =>
+          prev.map(c =>
+            c.id === activeConvId
+              ? { ...c, messages: loadedMessages }
+              : c
+          )
+        )
+      }).catch(err => {
+        console.error('加载对话消息失败:', err)
+      })
+    }
+  }, [activeConvId])
+
   const handleLogout = () => {
     logout()
     navigate('/login')
   }
 
+  /** 保存对话到后端（防抖） */
+  const saveConversationToBackend = useCallback((convId: string, title: string, msgs: Message[]) => {
+    // 清除之前的定时器
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current)
+    }
+
+    saveTimerRef.current = setTimeout(async () => {
+      const backendMessages = msgs.map(m => ({
+        role: m.role,
+        content: m.content,
+      }))
+
+      try {
+        if (convId.startsWith('local_')) {
+          // 本地对话第一次保存到后端
+          const res = await conversationAPI.create({ title, messages: backendMessages })
+          const newId = res.data.id
+          // 更新本地ID为后端返回的ID
+          setConversations(prev =>
+            prev.map(c =>
+              c.id === convId ? { ...c, id: newId } : c
+            )
+          )
+          setActiveConvId(prev => prev === convId ? newId : prev)
+        } else {
+          // 更新已有对话
+          await conversationAPI.update(convId, { title, messages: backendMessages })
+        }
+      } catch (err) {
+        console.error('保存对话失败:', err)
+      }
+    }, 500) // 500ms 防抖
+  }, [])
+
+  /** 更新指定对话的消息列表 */
+  const updateConversationMessages = useCallback((convId: string, updater: (msgs: Message[]) => Message[]) => {
+    setConversations(prev =>
+      prev.map(c =>
+        c.id === convId
+          ? { ...c, messages: updater(c.messages), lastTime: formatLastTime(new Date()) }
+          : c
+      )
+    )
+  }, [])
+
+  /** 新建对话 */
+  const handleNewChat = useCallback(() => {
+    // 如果当前对话就是空的，不重复创建
+    if (activeConversation && activeConversation.messages.length === 0) {
+      inputRef.current?.focus()
+      return
+    }
+    // 创建本地对话，等有消息时再保存到后端
+    const newConv: Conversation = {
+      id: 'local_' + Date.now().toString(),
+      title: '新的对话',
+      lastTime: '刚刚',
+      messages: [],
+    }
+    setConversations(prev => [newConv, ...prev])
+    setActiveConvId(newConv.id)
+    setInputValue('')
+  }, [activeConversation])
+
+  /** 切换对话 */
+  const handleSelectConversation = useCallback((convId: string) => {
+    if (convId === activeConvId) return
+    setActiveConvId(convId)
+    setInputValue('')
+  }, [activeConvId])
+
+  /** 删除对话 */
+  const handleDeleteConversation = useCallback((convId: string) => {
+    // 从后端删除（非本地对话）
+    if (!convId.startsWith('local_')) {
+      conversationAPI.delete(convId).catch(err => {
+        console.error('删除对话失败:', err)
+      })
+    }
+
+    setConversations(prev => {
+      const updated = prev.filter(c => c.id !== convId)
+      if (convId === activeConvId) {
+        if (updated.length === 0) {
+          const newConv: Conversation = {
+            id: 'local_' + Date.now().toString(),
+            title: '新的对话',
+            lastTime: '刚刚',
+            messages: [],
+          }
+          setActiveConvId(newConv.id)
+          return [newConv]
+        }
+        setActiveConvId(updated[0].id)
+      }
+      return updated
+    })
+  }, [activeConvId])
+
   const handleSend = async () => {
     const text = inputValue.trim()
     if (!text || isTyping) return
+
+    const currentConvId = activeConvId
 
     // 添加用户消息
     const userMsg: Message = {
@@ -60,7 +275,23 @@ export default function DashboardPage() {
       content: text,
       timestamp: new Date(),
     }
-    setMessages(prev => [...prev, userMsg])
+
+    // 如果是第一条消息，自动更新对话标题
+    const isFirstMessage = messages.length === 0
+    const newTitle = isFirstMessage ? generateTitle(text) : activeConversation?.title || '新的对话'
+
+    if (isFirstMessage) {
+      setConversations(prev =>
+        prev.map(c =>
+          c.id === currentConvId
+            ? { ...c, title: newTitle, messages: [...c.messages, userMsg], lastTime: formatLastTime(new Date()) }
+            : c
+        )
+      )
+    } else {
+      updateConversationMessages(currentConvId, msgs => [...msgs, userMsg])
+    }
+
     setInputValue('')
     setIsTyping(true)
 
@@ -83,7 +314,7 @@ export default function DashboardPage() {
       content: '',
       timestamp: new Date(),
     }
-    setMessages(prev => [...prev, aiMsg])
+    updateConversationMessages(currentConvId, msgs => [...msgs, aiMsg])
 
     try {
       const response = await chatAPI.sendMessageStream(chatHistory)
@@ -92,6 +323,7 @@ export default function DashboardPage() {
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let fullAiContent = ''
 
       if (!reader) throw new Error('无法读取响应流')
 
@@ -118,8 +350,9 @@ export default function DashboardPage() {
                   throw new Error(data.error)
                 }
                 if (data.content) {
-                  setMessages(prev =>
-                    prev.map(m =>
+                  fullAiContent += data.content
+                  updateConversationMessages(currentConvId, msgs =>
+                    msgs.map(m =>
                       m.id === aiMsgId
                         ? { ...m, content: m.content + data.content }
                         : m
@@ -127,7 +360,6 @@ export default function DashboardPage() {
                   )
                 }
               } catch (parseErr) {
-                // 忽略解析错误，继续处理
                 if (parseErr instanceof Error && parseErr.message !== 'Unexpected end of JSON input') {
                   console.warn('SSE解析警告:', parseErr)
                 }
@@ -136,16 +368,24 @@ export default function DashboardPage() {
           }
         }
       }
+
+      // ===== AI回复完成后，保存对话到后端 =====
+      const finalMessages = [...messages, userMsg, { ...aiMsg, content: fullAiContent }]
+      saveConversationToBackend(currentConvId, newTitle, finalMessages)
+
     } catch (err) {
       console.error('AI请求失败:', err)
-      // 如果AI消息还是空的，显示错误信息
-      setMessages(prev =>
-        prev.map(m =>
+      const errorContent = `⚠️ 抱歉，请求出错了：${err instanceof Error ? err.message : '未知错误'}。请稍后重试。`
+      updateConversationMessages(currentConvId, msgs =>
+        msgs.map(m =>
           m.id === aiMsgId && !m.content
-            ? { ...m, content: `⚠️ 抱歉，请求出错了：${err instanceof Error ? err.message : '未知错误'}。请稍后重试。` }
+            ? { ...m, content: errorContent }
             : m
         )
       )
+      // 即使出错也保存用户消息到后端
+      const finalMessages = [...messages, userMsg]
+      saveConversationToBackend(currentConvId, newTitle, finalMessages)
     } finally {
       setIsTyping(false)
     }
@@ -160,7 +400,6 @@ export default function DashboardPage() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value)
-    // 自动调整高度
     const el = e.target
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 200) + 'px'
@@ -168,252 +407,54 @@ export default function DashboardPage() {
 
   const handleSuggestionClick = (desc: string) => {
     setInputValue(desc)
-    // 自动聚焦输入框
     inputRef.current?.focus()
   }
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  // 加载中显示
+  if (isLoading) {
+    return (
+      <div className="chat-layout">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', color: 'var(--text-muted)' }}>
+          正在加载对话记录...
+        </div>
+      </div>
+    )
   }
-
-  const hasMessages = messages.length > 0
 
   return (
     <div className="chat-layout">
       {/* ===== 左侧边栏 ===== */}
-      <aside className={`chat-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
-        <div className="sidebar-header">
-          <div className="sidebar-brand">
-            <div className="sidebar-logo">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/>
-                <path d="M16 14H8a4 4 0 0 0-4 4v2h16v-2a4 4 0 0 0-4-4z"/>
-                <circle cx="12" cy="6" r="1" fill="currentColor"/>
-              </svg>
-            </div>
-            {!sidebarCollapsed && <span className="sidebar-brand-text">小李助手</span>}
-          </div>
-          <button
-            className="sidebar-toggle"
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              {sidebarCollapsed ? (
-                <>
-                  <line x1="3" y1="12" x2="21" y2="12"/>
-                  <line x1="3" y1="6" x2="21" y2="6"/>
-                  <line x1="3" y1="18" x2="21" y2="18"/>
-                </>
-              ) : (
-                <>
-                  <polyline points="11 17 6 12 11 7"/>
-                  <line x1="6" y1="12" x2="20" y2="12"/>
-                </>
-              )}
-            </svg>
-          </button>
-        </div>
-
-        {!sidebarCollapsed && (
-          <>
-            <button className="new-chat-btn" onClick={() => setMessages([])}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19"/>
-                <line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-              新建对话
-            </button>
-
-            <div className="sidebar-conversations">
-              <div className="conversations-label">最近对话</div>
-              {conversations.map(conv => (
-                <div key={conv.id} className="conversation-item active">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                  </svg>
-                  <span className="conversation-title">{conv.title}</span>
-                  <span className="conversation-time">{conv.lastTime}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* 底部用户信息 */}
-        <div className="sidebar-footer">
-          {!sidebarCollapsed ? (
-            <div className="sidebar-user">
-              <div className="sidebar-user-avatar">
-                {user?.username?.[0]?.toUpperCase()}
-              </div>
-              <div className="sidebar-user-info">
-                <span className="sidebar-user-name">{user?.username}</span>
-                <span className="sidebar-user-email">{user?.email}</span>
-              </div>
-              <button className="sidebar-logout-btn" onClick={handleLogout} title="退出登录">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                  <polyline points="16 17 21 12 16 7"/>
-                  <line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
-              </button>
-            </div>
-          ) : (
-            <div className="sidebar-user-collapsed" onClick={handleLogout} title="退出登录">
-              <div className="sidebar-user-avatar small">
-                {user?.username?.[0]?.toUpperCase()}
-              </div>
-            </div>
-          )}
-        </div>
-      </aside>
+      <Sidebar
+        user={user}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        onNewChat={handleNewChat}
+        onLogout={handleLogout}
+        conversations={conversations}
+        activeConvId={activeConvId}
+        onSelectConversation={handleSelectConversation}
+        onDeleteConversation={handleDeleteConversation}
+      />
 
       {/* ===== 主聊天区域 ===== */}
       <main className="chat-main">
-        {/* 消息区域 */}
-        <div className="chat-messages-container">
-          {!hasMessages ? (
-            /* ===== 欢迎界面 ===== */
-            <div className="chat-welcome">
-              <div className="welcome-logo">
-                <div className="welcome-logo-icon">
-                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/>
-                    <path d="M16 14H8a4 4 0 0 0-4 4v2h16v-2a4 4 0 0 0-4-4z"/>
-                    <circle cx="12" cy="6" r="1" fill="currentColor"/>
-                  </svg>
-                </div>
-              </div>
-              <h1 className="welcome-title">你好，{user?.username}！</h1>
-              <p className="welcome-subtitle">我是小李助手，你的智能 AI 伙伴。有什么我可以帮你的？</p>
+        <ChatContent
+          user={user}
+          messages={messages}
+          isTyping={isTyping}
+          suggestions={SUGGESTIONS}
+          messagesEndRef={messagesEndRef}
+          onSuggestionClick={handleSuggestionClick}
+        />
 
-              <div className="suggestion-grid">
-                {SUGGESTIONS.map((item, i) => (
-                  <button
-                    key={i}
-                    className="suggestion-card"
-                    onClick={() => handleSuggestionClick(item.desc)}
-                  >
-                    <span className="suggestion-icon">{item.icon}</span>
-                    <span className="suggestion-title">{item.title}</span>
-                    <span className="suggestion-desc">{item.desc}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            /* ===== 消息列表 ===== */
-            <div className="chat-messages">
-              {messages.map(msg => (
-                <div key={msg.id} className={`message-row ${msg.role}`}>
-                  <div className="message-avatar">
-                    {msg.role === 'assistant' ? (
-                      <div className="avatar-ai">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/>
-                          <path d="M16 14H8a4 4 0 0 0-4 4v2h16v-2a4 4 0 0 0-4-4z"/>
-                        </svg>
-                      </div>
-                    ) : (
-                      <div className="avatar-user">
-                        {user?.username?.[0]?.toUpperCase()}
-                      </div>
-                    )}
-                  </div>
-                  <div className="message-content">
-                    <div className="message-header">
-                      <span className="message-name">
-                        {msg.role === 'assistant' ? '小李助手' : user?.username}
-                      </span>
-                      <span className="message-time">{formatTime(msg.timestamp)}</span>
-                    </div>
-                    <div className="message-text">
-                      {msg.content.split('\n').map((line, i) => (
-                        <span key={i}>
-                          {line}
-                          {i < msg.content.split('\n').length - 1 && <br />}
-                        </span>
-                      ))}
-                    </div>
-                    {msg.role === 'assistant' && (
-                      <div className="message-actions">
-                        <button className="msg-action-btn" title="复制">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                          </svg>
-                        </button>
-                        <button className="msg-action-btn" title="点赞">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/>
-                          </svg>
-                        </button>
-                        <button className="msg-action-btn" title="踩">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>
-                          </svg>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {/* AI 正在输入 */}
-              {isTyping && (
-                <div className="message-row assistant">
-                  <div className="message-avatar">
-                    <div className="avatar-ai">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/>
-                        <path d="M16 14H8a4 4 0 0 0-4 4v2h16v-2a4 4 0 0 0-4-4z"/>
-                      </svg>
-                    </div>
-                  </div>
-                  <div className="message-content">
-                    <div className="message-header">
-                      <span className="message-name">小李助手</span>
-                    </div>
-                    <div className="message-text">
-                      <div className="chat-typing-indicator">
-                        <span></span><span></span><span></span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* ===== 输入区域 ===== */}
-        <div className="chat-input-area">
-          <div className="chat-input-wrapper">
-            <textarea
-              ref={inputRef}
-              className="chat-input"
-              placeholder="给小李助手发消息..."
-              value={inputValue}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyDown}
-              rows={1}
-            />
-            <button
-              className={`chat-send-btn ${inputValue.trim() ? 'active' : ''}`}
-              onClick={handleSend}
-              disabled={!inputValue.trim() || isTyping}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="22" y1="2" x2="11" y2="13"/>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-              </svg>
-            </button>
-          </div>
-          <p className="chat-disclaimer">小李助手可能会犯错，请核实重要信息。</p>
-        </div>
+        <ChatInput
+          inputValue={inputValue}
+          isTyping={isTyping}
+          inputRef={inputRef}
+          onInputChange={handleInputChange}
+          onKeyDown={handleKeyDown}
+          onSend={handleSend}
+        />
       </main>
     </div>
   )
