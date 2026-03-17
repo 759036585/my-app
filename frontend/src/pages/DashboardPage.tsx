@@ -445,6 +445,7 @@ export default function DashboardPage() {
           suggestions={SUGGESTIONS}
           messagesEndRef={messagesEndRef}
           onSuggestionClick={handleSuggestionClick}
+          conversationTitle={activeConversation?.title}
         />
 
         <ChatInput
