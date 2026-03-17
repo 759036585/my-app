@@ -102,7 +102,7 @@ jobs:
           target: '/var/www/html/'
           strip_components: 2
 
-      # SSH 部署后端（从 Gitee 拉取）
+      # SSH 部署后端（从 GitHub 拉取）
       - name: Deploy backend via SSH
         uses: appleboy/ssh-action@v1.0.0
         with:
@@ -114,8 +114,8 @@ jobs:
             set -e
             cd /home/www/my-app
 
-            echo "📥 从 Gitee 拉取最新代码..."
-            git remote set-url origin https://gitee.com/li759036585/my-app.git
+            echo "📥 从 GitHub 拉取最新代码..."
+            git remote set-url origin git@github.com:759036585/my-app.git
             git pull origin master
 
             echo "📦 安装后端依赖..."
